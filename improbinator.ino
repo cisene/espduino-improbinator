@@ -17,7 +17,10 @@ extern "C" {
 #include "user_interface.h"
 }
 
-#define LED 39
+/* #define LED 39 */
+#define BUILTIN_LED 16
+
+#define USE_SERIAL Serial
 
 uint8_t phones[] = {
   0x24, 0xDB, 0xAC, // Huawei
@@ -364,26 +367,34 @@ uint8_t clientBufferIndex[] = {
 };
 
 /* ======================================================================== */
+uint8_t packet[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 
-
-
-
+};
 /* ======================================================================== */
 void setup() {
-  delay(500);
-  pinMode(LED, OUTPUT);
+  USE_SERIAL.begin(115200);
+  for (uint8_t t = 4; t > 0; t--) {
+    USE_SERIAL.printf("[SETUP] WAIT %d...\n", t);
+    USE_SERIAL.flush();
+    delay(1000);
+  }
+  pinMode(BUILTIN_LED, OUTPUT);
 
 
   wifi_set_opmode(STATION_MODE);
   wifi_promiscuous_enable(1);
+  Serial.println("Ready!");
 }
 
 
 
 void loop() {
-  // debugPort.println("Loop start");
+  Serial.println("Loop start");
 
-  digitalWrite(LED, HIGH);   // Turn on the LED
+  digitalWrite(BUILTIN_LED, HIGH);   // Turn on the LED
 
   int i;
   int slotIndex;
@@ -396,22 +407,27 @@ void loop() {
   for (i = 0; i <= sizeof(clientBufferIndex) - 1; i = i + 1) {
     if (clientBufferIndex[i] != 0) {
       slotIndex = (i * 0x30);
+      Serial.printf("Slot %d was free\n", i);
       if (clientBuffer[slotIndex] <= 1) {
         clientBufferIndex[i] = 0;
       } else {
-        clientBuffer[slotIndex] -= 1;
+        clientBuffer[slotIndex] = clientBuffer[slotIndex] - 1;
       }
+    } else {
+      Serial.printf("Slot %d is active\n", i);
     }
   }
 
   /* Prepare new faked client into buffer */
   for (i = 0; i <= sizeof(clientBufferIndex) - 1; i = i + 1) {
-    if (clientBufferIndex[i] != 0) {
+    Serial.printf("Working on %d of %d\n", i, sizeof(clientBufferIndex) - 1);
+
+    if (clientBufferIndex[i] == 0x00) {
       clientBufferIndex[i] = 0x01;
       slotIndex = (i * 0x30);
 
       /* Set a random TTL */
-      clientBuffer[slotIndex] = random(10, 240);
+      clientBuffer[slotIndex] = random(0x0a, 0xf0);
 
       /* Copy template into buffer */
       for (prf = 0; prf <= 0x2f; prf = prf + 1) {
@@ -438,19 +454,37 @@ void loop() {
     }
   }
 
-  /* Randomize channel */
-  channel = random(1, 14);
-  wifi_set_channel(channel);
+  /* Send frames */
+  for (i = 0; i <= sizeof(clientBufferIndex) - 1; i = i + 1) {
+    Serial.printf("Preparing to send %d of %d\n", i, sizeof(clientBufferIndex) - 1);
+    if (clientBufferIndex[i] != 0) {
+      slotIndex = (i * 0x30);
+
+      /* Copy buffer slot to packet */
+      for (prf = 0; prf <= 0x2f; prf = prf + 1) {
+        packet[prf] = clientBuffer[(slotIndex + 1) + prf];
+      }
+
+      /* Randomize channel */
+      channel = random(1, 14);
+      wifi_set_channel(channel);
+      Serial.printf("Channel was set to %d\n", channel);
 
 
-  /* TODO: Stitch up frames properly */
+      /* TODO: Stitch up frames properly */
 
-  // wifi_send_pkt_freedom(packet, 57, 0);
-  // wifi_send_pkt_freedom(packet, 57, 0);
-  // wifi_send_pkt_freedom(packet, 57, 0);
+      /* Broadcast broadcast broadcast! */
+      for (p = 0; p <= 0x02; p = p + 1) {
+        wifi_send_pkt_freedom(packet, 0x2f, 0);
+        // wifi_send_pkt_freedom(packet, 57, 0);
+        // wifi_send_pkt_freedom(packet, 57, 0);
+        Serial.println("Packet sent!");
+      }
 
-  digitalWrite(LED, LOW);
+    }
+  }
+  digitalWrite(BUILTIN_LED, LOW);
 
-  // debugPort.println("Loop End");
-  delay(1);
+  Serial.println("Loop End");
+  delay(1000);
 }
