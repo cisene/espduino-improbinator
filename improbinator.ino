@@ -1,17 +1,19 @@
 /*
-   NO LICENSES
+    NO LICENSES
 
-   DISCLAIMER: By downloading and executing this sketch you might commit a criminal fellony in some country.
+    DISCLAIMER: By downloading and executing this sketch you might commit a criminal fellony in some country.
 
-   This code is for EDUCATIONAL USE ONLY.
+    This code is for EDUCATIONAL USE ONLY.
 
-   No warranties, no support, no batteries included.
+    No warranties, no support, no batteries included.
 
-   Author: Christopher Isene<christopher.isene@gmail.com>
-   Revision: 201610291339
+    Author: Christopher Isene <christopher.isene@gmail.com> @cisene
+    Revision: 201610291339
 
-  Inspiration:
-    https://hackaday.com/tag/wifi-throwie/
+    Target device: ESPduino
+
+    Inspiration:
+      https://hackaday.com/tag/wifi-throwie/
 
 */
 #include <ESP8266WiFi.h>
@@ -20,11 +22,10 @@ extern "C" {
 #include "user_interface.h"
 }
 
-/* #define LED 39 */
 #define BUILTIN_LED 16
-
 #define USE_SERIAL Serial
 
+/* ======================================================================== */
 uint8_t phones[] = {
   0x00, 0x1E, 0x52, // Apple
   0x00, 0x1F, 0xF3, // Apple
@@ -127,7 +128,7 @@ uint8_t phones[] = {
   0xF8, 0x3D, 0xFF, // Huawei
   0xF8, 0xDB, 0x7F  // HTC
 };
-
+/* ======================================================================== */
 uint8_t accesspoints[] = {
   0x00, 0x01, 0x38, // XAVi Technologies Corp.
   0x00, 0x03, 0x52, // Colubris Networks
@@ -230,7 +231,7 @@ uint8_t accesspoints[] = {
   0xF4, 0x4E, 0x05, // Cisco
   0xF4, 0xCF, 0xE2, // Cisco
 };
-
+/* ======================================================================== */
 char* ssids[] = {
   "ASUS",
   "All Station Guests",
@@ -285,10 +286,7 @@ char* ssids[] = {
   "wireless",
   "zyxel"
 };
-
-String alfa = "1234567890qwertyuiopasdfghjkklzxcvbnm QWERTYUIOPASDFGHJKLZXCVBNM_";
-byte channel;
-
+/* ======================================================================== */
 // Probe Request packet buffer
 uint8_t probereq[128] = {
   /* 00 */  0x40,                               /* Management Frame - Probe Request */
@@ -311,8 +309,8 @@ uint8_t probereq[128] = {
 uint8_t clientBuffer[] = {
 
   /*
-     0x00 - First byte of packet is TTL - Time to live in seconds
-     0x01 - 0x2f is Probe Request frame payload
+     0x00 - 0x2e is Probe Request frame payload
+     0x2f - Spare byte
   */
 
   /* 00 */
@@ -357,7 +355,7 @@ uint8_t clientBuffer[] = {
 
 
 };
-
+/* ======================================================================== */
 uint8_t clientBufferIndex[] = {
   /*
      As many elements as buffer slots
@@ -374,7 +372,6 @@ uint8_t packet[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-
 };
 /* ======================================================================== */
 int flipflop = 0;
@@ -386,42 +383,58 @@ void setup() {
     USE_SERIAL.flush();
     delay(1000);
   }
-  
+
   /* Define BUILTIN_LED */
   pinMode(BUILTIN_LED, OUTPUT);
 
   /* Set Wifi operation mode */
   wifi_set_opmode(STATION_MODE);
   wifi_promiscuous_enable(1);
-  
+
   Serial.println("Ready!");
 }
-
-
-
+/* ======================================================================== */
 void loop() {
   unsigned int i;
   unsigned int slotIndex;
   unsigned int prf;
   unsigned int oui_idx;
   unsigned int p;
-  unsigned int s;
+  unsigned int channel;
 
-  // Serial.println("Loop start");
+  /* TODO:
+  
+    clientBufferIndex[0]
+      always stuck on ZERO causing Prepare portion of the code to be
+      run on each iteration, packet will not be sent as trigger is TTL != 0
+
+    Destination MAC
+      Decide between broadcast FF:FF:FF:FF:FF:FF or a faked OUI + random 3 bytes
+
+    SSID
+      Currently 'AAAAAAAAAAAAAAA' but should be triggered on Destination MAC,
+      where otherwise a fake SSID string should be copied into the frame.
+      Might need adjustment and adaption to SSID length.
+
+    Capability bytes
+      Check captured packets and imitate/mimic the capabilities as we want
+      to look __exactly__ like random smartphones.
+  */
+
 
   /* TTL timing for buffer entries */
   for (i = 0; i <= (sizeof(clientBufferIndex) - 0x01); i = i + 0x01) {
     Serial.printf("Slot %d has TTL %d seconds\n", i, clientBufferIndex[i]);
     if (clientBufferIndex[i] != 0x00) {
-        clientBufferIndex[i] = (clientBufferIndex[i] - 0x01);
+      clientBufferIndex[i] = (clientBufferIndex[i] - 0x01);
     }
   }
 
   /* Prepare new faked client into buffer */
-  for (i = 0; i <= (sizeof(clientBufferIndex) - 0x01); i = i + 0x01) {
+  for (i = 0x00; i <= (sizeof(clientBufferIndex) - 0x01); i = i + 0x01) {
     if (clientBufferIndex[i] == 0x00) {
       Serial.printf("START Prepare slot %d\n", i);
-      
+
       /* Set a random TTL */
       clientBufferIndex[i] = random(0x0f, 0x5a);
       Serial.printf("\tTTL for slot %d set to %d\n", i, clientBufferIndex[i]);
@@ -469,39 +482,36 @@ void loop() {
   }
 
   /* Send frames */
-  for (s = 0; s <= 0x02; s = s + 0x01) {
-    for (i = 0; i <= (sizeof(clientBufferIndex) - 0x01); i = i + 0x01) {
-      if (clientBufferIndex[i] != 0x00) {
-        slotIndex = (i * 0x30);
-  
-        /* Copy buffer slot to packet */
-        for (prf = 0; prf <= 0x2f; prf = prf + 0x01) {
-          packet[prf] = clientBuffer[(slotIndex) + prf];
-        }
-  
-        /* Randomize channel */
-        channel = random(0x01, 0x0e);
-        wifi_set_channel(channel);
-        
-        /* Broadcast broadcast broadcast! */
-        for (p = 0; p <= 0x02; p = p + 1) {
-          wifi_send_pkt_freedom(packet, 0x2f, 0);
-        }
+  for (i = 0; i <= (sizeof(clientBufferIndex) - 0x01); i = i + 0x01) {
+    if (clientBufferIndex[i] != 0x00) {
+      slotIndex = (i * 0x30);
+
+      /* Copy buffer slot to packet */
+      for (prf = 0; prf <= 0x2f; prf = prf + 0x01) {
+        packet[prf] = clientBuffer[(slotIndex) + prf];
+      }
+
+      /* Randomize channel */
+      channel = random(0x01, 0x0e);
+      wifi_set_channel(channel);
+
+      /* Broadcast broadcast broadcast! */
+      for (p = 0; p <= 0x02; p = p + 1) {
+        wifi_send_pkt_freedom(packet, 0x2f, 0);
       }
     }
-  
+
   }
 
-  // Serial.println("Loop End");
   Serial.println("====================================================================");
 
   /* Flipflop the blue LED to indicate activity */
-  if(flipflop == 0x00) {
+  if (flipflop == 0x00) {
     digitalWrite(BUILTIN_LED, LOW);
-    flipflop = 0x01;    
+    flipflop = 0x01;
   } else {
     digitalWrite(BUILTIN_LED, HIGH);
-    flipflop = 0x00;    
+    flipflop = 0x00;
   }
 
   delay(0x3e8);
